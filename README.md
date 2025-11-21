@@ -87,18 +87,21 @@ System 2は、生データからドメイン固有の「不変量（Invariants�
 **1. Physical Invariant: Lipschitz Consistency (物理的慣性)**
 物理システムの状態変化は、有限のエネルギー制約によりリプシッツ連続性を持つ。
 時刻 $t$ における予測値 $\hat{x}_t$ と観測値 $x_t$ の残差ノルム $r_t$ を監視する。
+
 $$r_t = \| x_t - f_{phys}(x_{t-1}, \dots, x_{t-k}) \|_2 \le \epsilon$$
 
   * **Target:** Slow Drift Attack（予測モデルからの累積的乖離）
 
 **2. Logical Invariant: Entropic Divergence (論理的エントロピー)**
 正常な商取引における数値の端数分布 $P(d)$ は、ベンフォードの法則や心理的価格設定に基づく特定のバイアスを持つ。観測分布と自然分布 $U$ のカルバック・ライブラー情報量（KL Divergence）を監視する。
+
 $$\Phi_{logic} = D_{KL}(P \| U) = \sum P(i) \log \frac{P(i)}{U(i)}$$
 
   * **Target:** Smudged Salami Attack（乱数生成によるエントロピー増大）
 
 **3. Cyber Invariant: Algorithmic Regularity (サイバー律動性)**
 ボットによる通信は、人間よりも情報の多様性（Entropy）が低い。時間窓 $W$ 内のユニーク比率 $R$ を監視する。
+
 $$\Phi_{cyber} = 1 - \frac{\|Unique(W)\|}{\|W\|}$$
 
   * **Target:** Jittery Beacon Attack（分散の欠如）
@@ -131,15 +134,10 @@ Output: Augmented Training Set D_aug
 ### 3.3 Decision Layer: Adaptive Robust Thresholding
 
 環境ごとのノイズレベル変動を吸収するため、学習期間における不変量スコアの中央値（Median）と四分位範囲（IQR）を用いたロバストなZスコア変換を行い、動的に閾値を決定する。
+
 $$Z(x) = \frac{\text{Score}(x) - \text{Median}}{\text{IQR}}$$
+
 これにより、人手によるチューニングを不要（Zero-Configuration）とした。
-
------
-
-承知いたしました。
-論文の後半部分、**「第4章：評価実験（Evaluation）」**から**「結論（Conclusion）」**までを執筆します。
-
-ここでは、査読者が最も厳しく目を光らせる**「実験の公平性」「100%検知の論拠」「GANに対する堅牢性の理由」**について、これまでの実験データを基に、**数理的・統計的な事実**として提示します。感情的な主張は一切排除し、データが語る真実のみを記述します。
 
 ---
 
