@@ -51,6 +51,8 @@
 
 我々は、対象システムを有向非巡回グラフ（DAG）$G = (V, E)$ として定義する。
 
+![causal_graph](/images/causal_graph.png)
+
 *(Fig 1: 本研究が定義し、統計的に検証した因果ダイアグラム。Cyberを起点とし、PhysicalおよびLogicalへの因果流が存在する)*
 
   * **Definition:**
