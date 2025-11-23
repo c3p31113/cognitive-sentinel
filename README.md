@@ -368,7 +368,7 @@ Neuro-Symbolic AIは、ニューラルネットワークの学習能力と、シ
 
 本研究で使用したソースコード、データ生成スクリプト、および実験設定ファイルは、以下のGitHubリポジトリにてMITライセンスの下で公開されている。
 
-  * **Repository URL:** `https://github.com/[YourID]/cognitive-sentinel`
+  * **Repository URL:** `https://github.com/c3p31113/cognitive-sentinel`
   * **Version:** 1.0.0 (Golden Master)
   * **DOI:** [Reserved for Camera-ready]
 
@@ -425,7 +425,7 @@ cognitive-sentinel/
 これには、対象システムと同等の計算リソースと、物理環境への完全なアクセス権（White-box access to physical plant）が必要となる。
 
 一方、防御側（本手法）は、単に観測されたデータの不整合をチェックするだけでよいため、計算コストは極めて低い（$O(N)$）。
-この\*\*「攻撃コストの増大（Computational Complexity of Mimicry）」と「防御コストの低減（Computational Complexity of Verification）」という非対称性\*\*を作り出すことこそが、セキュリティ研究のゴールであり、本研究はその有効な手段を提供する。
+この「攻撃コストの増大（Computational Complexity of Mimicry）」と「防御コストの低減（Computational Complexity of Verification）」という非対称性を作り出すことこそが、セキュリティ研究のゴールであり、本研究はその有効な手段を提供する。
 
 ### 10.2 Responsible Disclosure (責任ある開示)
 
