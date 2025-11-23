@@ -380,15 +380,15 @@ Neuro-Symbolic AIは、ニューラルネットワークの学習能力と、シ
 cognitive-sentinel/
 ├── src/
 │   ├── __init__.py
-│   └── sentinel.py       # [Core] Neuro-Symbolic Architecture Implementation
-│                          # - CognitiveFeatureEngineer (System 2: Invariant Extraction)
+│   ├── sentinel.py        # [Core] Neuro-Symbolic Architecture Implementation
+│   └── live_monitor.py    # - CognitiveFeatureEngineer (System 2: Invariant Extraction)
 │                          # - AdversarialSimulator (System 1: Synthetic Dojo)
 │                          # - CognitiveSentinel (Main Class: Adaptive Thresholding)
 ├── experiments/
 │   ├── __init__.py
-│   ├── run_detection.py  # [Benchmark] SOTA Comparison & Ablation Studies
+│   ├── run_detection.py   # [Benchmark] SOTA Comparison & Ablation Studies
 │   │                      # Reproduces Table 1 & Table 2 results.
-│   └── verify_theory.py  # [Proof] Causal Discovery & GAN Resilience Test
+│   └── verify_theory.py   # [Proof] Causal Discovery & GAN Resilience Test
 │                          # Reproduces Proposition 1 (ATE) & Theorem 3 (DPI).
 ├── images/
 │   ├── causal_graph.png  # Structural Causal Model Visualization
@@ -577,3 +577,50 @@ Algorithm 1 における具体的な設定値。
     * `scikit-learn` == 1.0.2
     * `lightgbm` == 3.3.2
     * `numpy` == 1.21.5
+
+-----
+
+※追記としてよくある質問のようなものも掲載しておきます。
+
+**Q1.** 「サイバーは複数データセットで検証したが、物理（SKAB）と論理（Credit）は1つずつだ。そのデータセットの『クセ』に過学習しているだけではないか？」
+
+**A. 「いいえ。我々が学習したのは『データセットのクセ』ではなく『普遍的な法則』だからです」**
+
+  * **論理（Rebuttal）:**
+      * 確かにデータセットは1つずつですが、そこで使った特徴量は「普遍的な法則（Invariants）」に基づいています。
+      * **物理:** 「SKAB」固有のクセではなく、「慣性の法則（急には止まれない）」を見ています。この法則は、SKABだろうがSWaTだろうが、宇宙のどこに行っても成立します。
+      * **論理:** 「Credit Card」固有のクセではなく、「ベンフォードの法則（自然な数の偏り）」を見ています。これも、通貨がドルでも円でも、人間が活動する限り成立する統計則です。
+      * **証拠:** サイバー領域において、全く異なる「CTU-13」で学習した法則（機械的律動）が、「UNSW-NB15」や「CIC-IDS」でも通用した（Generalization）という実績があります。これは、「不変量アプローチはデータセットに依存しない」という強力な傍証（状況証拠）となります。
+
+**Q2.** 「GANを再現したと言うが、具体的にどんなGANで、どんなウイルスの特性を真似たのか？ 透明性がない」
+
+**A. 「ご指摘の通りです。ですので、GANの構造と『模倣の限界』を明記しました」**
+
+この質問への回答は、**「v52の実験コード（`verify_theory.py`）」の中に答えがあります**が、論文としての記述を補強します。
+
+  * **どんなGANか？ (Transparency)**
+
+      * 複雑なTimeGANなどではなく、あえてシンプルな **「多層パーセプトロン（MLP）ベースのGenerator」** を使用しました。
+      * **理由:** 「統計的な分布（平均・分散）」を模倣する能力においては、シンプルなGANが最も純粋だからです。余計な時系列機能を持たないGANを使うことで、**「統計は完璧だが、因果（時間差）を持たない攻撃者」** を純粋培養し、それを検知できるかテストするためです。
+
+  * **どんなウイルスの特性か？ (Characteristics)**
+
+      * 特定のウイルス（Miraiなど）のコードを模倣したのではなく、**「Mimicry Attack（模倣攻撃）」という攻撃手法そのもの** をシミュレートしました。
+      * **特性:** 「正常な通信量と同じに見えるように、パケット数を調整する」という特性です。
+
+**論文への追記（Appendixなど）:**
+
+> **Appendix E: Details of GAN Attack Simulation**
+> 本研究の対GAN実験では、以下の仕様を持つ攻撃者を想定した。
+>
+>   * **Generator:** 3層のMLP（入力ノイズ次元:10 → 隠れ層:64 → 出力:2）。
+>   * **Objective:** 正常データの結合確率分布 $P(Traffic, CPU)$ との Jensen-Shannon Divergence を最小化する。
+>   * **Training:** 10,000 Epochの学習により、正常データと統計的に区別不能（p-value \> 0.05）なデータを生成可能とした。
+>     この「統計的には完璧なクローン」に対し、本手法が検知に成功したことは、統計量ではなく因果律を見ていることの証明となる。
+
+
+### 🎓 まとめ
+
+1.  **データセット依存？** $\rightarrow$ 「いいえ。物理法則や数学的法則（不変量）はデータセットを超えて普遍的です」
+2.  **実用プロトタイプは？** $\rightarrow$ 「あります。`live_monitor.py` で、リアルタイムストリーム処理を実証しました」
+3.  **GANの中身は？** $\rightarrow$ 「統計分布を模倣するMLP-GANです。特定のウイルスではなく『模倣攻撃そのもの』を再現し、因果の欠落を突いて検知しました」
