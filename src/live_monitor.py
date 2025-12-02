@@ -46,12 +46,19 @@ class LiveMonitor:
         df_window = pd.DataFrame(list(self.buffer))
         
         try:
-            pred = self.sentinel.predict(df_window)[-1]
-            if pred == 1:
-                msg = f"🚨 [ALERT] ANOMALY DETECTED! Value: {value:.2f} (Physical Violation)"
+            # 【変更】0/1ではなく、信頼度スコア(0.0~1.0)を取得
+            score = self.sentinel.predict_score(df_window)[-1]
+            confidence = score * 100
+            
+            if score > 0.5:
+                # 異常判定 (信頼度付き)
+                msg = f"🚨 [ALERT] ANOMALY! Confidence: {confidence:.1f}% | Value: {value:.2f}"
                 print(msg)
             else:
-                msg = f"🟢 [Normal] System Stable.   Value: {value:.2f}"
+                # 正常判定 (安心度付き)
+                # 正常の場合は (1 - score) が安心度
+                safety = (1 - score) * 100
+                msg = f"🟢 [Normal] Safety: {safety:.1f}% | Value: {value:.2f}"
                 print(msg)
         except Exception as e:
             print(f"❌ [Error] {e}")
@@ -81,8 +88,7 @@ if __name__ == "__main__":
     print("--- [Scenario 2] Attack Injection (Freeze Attack) ---")
     print("   ! Intruder injects fixed value to spoof sensor...")
     
-    # データ数を増やして、確実に検知フェーズに入るようにする
-    attack_values = [50.0] * 35 
+    attack_values = [50.0] * 25 
     
     for v in attack_values:
         monitor.process_stream(v)
