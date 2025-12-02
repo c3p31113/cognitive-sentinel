@@ -8,7 +8,7 @@ from sklearn.preprocessing import RobustScaler, MinMaxScaler, QuantileTransforme
 warnings.filterwarnings("ignore")
 
 # ==============================================================================
-# [Module 1] The Prefrontal Cortex (Feature Engineering)
+# [Module 1] The Prefrontal Cortex
 # ==============================================================================
 class CognitiveFeatureEngineer:
     def process(self, df, domain):
@@ -16,12 +16,11 @@ class CognitiveFeatureEngineer:
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         
         if domain == 'phys':
-            # Physics: Inertia (Speed) & Volatility (Vibration)
             base_cols = [c for c in numeric_cols if 'lag' not in c and 'roll' not in c and 'anomaly' not in c]
             for c in base_cols:
-                # 1. Inertia/Velocity
+                # 1. Inertia
                 df_eng[f'{c}_lag1'] = df[c].diff().fillna(0)
-                # 2. Volatility/Dynamics
+                # 2. Volatility
                 df_eng[f'{c}_roll_std'] = df[c].rolling(window=5).std().fillna(0)
                 # 3. Deviation
                 roll_mean = df[c].rolling(window=10).mean().fillna(0)
@@ -45,7 +44,7 @@ class CognitiveFeatureEngineer:
         return df_eng.fillna(0)
 
 # ==============================================================================
-# [Module 2] The Synthetic Dojo (Data Augmentation)
+# [Module 2] The Synthetic Dojo
 # ==============================================================================
 class AdversarialSimulator:
     def _strip(self, df):
@@ -66,18 +65,14 @@ class AdversarialSimulator:
                 std_val = inj[c].std() if inj[c].std() > 1e-9 else 1.0
                 
                 # 半分はFrequency、半分はFreeze
-                # 【重要】Freezeには「完全停止」も含める（Live Monitor対策）
-                
                 # 前半: Frequency Attack
                 freq_attack = np.sin(t[:N//2] * 8.0) * std_val 
                 inj.iloc[:N//2, inj.columns.get_loc(c)] = mean_val + freq_attack
                 
                 # 後半: Freeze Attack
                 if np.random.rand() > 0.5:
-                    # 完全停止 (Live Monitorと同じ状況)
                     inj.iloc[N//2:, inj.columns.get_loc(c)] = mean_val
                 else:
-                    # 微小ノイズあり (汎化性能用)
                     inj.iloc[N//2:, inj.columns.get_loc(c)] = mean_val + np.random.normal(0, 0.001, N - N//2)
 
         elif domain == 'logic':
@@ -101,18 +96,20 @@ class CognitiveSentinel:
         self.domain = domain
         self.engineer = CognitiveFeatureEngineer()
         self.simulator = AdversarialSimulator()
-        
-        # System 1 (Main Brain)
         self.clf = LGBMClassifier(n_estimators=200, verbose=-1, random_state=42)
-        self.scaler = RobustScaler()
+        self.reg = None
+        self.iso = None
+        self.qt = QuantileTransformer(output_distribution='normal', random_state=42)
+        
+        if domain == 'logic': self.scaler = MinMaxScaler()
+        else: self.scaler = RobustScaler()
+        
         self.features_ = None
+        self.threshold_ = 0.8
 
     def fit(self, X, y):
-        # 1. Feature Engineering
         X_eng = self.engineer.process(X, self.domain)
         self.features_ = X_eng.columns
-        
-        # 2. Synthetic Dojo
         X_norm_raw = X[y==0].copy()
         
         try:
@@ -131,20 +128,36 @@ class CognitiveSentinel:
             X_combined = X_eng
             y_combined = pd.Series(y)
             
-        # 3. Train System
         X_s = self.scaler.fit_transform(X_combined)
         self.clf.fit(X_s, y_combined)
+        
+        # System 2
+        X_norm_s = self.scaler.transform(X_eng[y==0])
+        if self.domain == 'phys':
+            if X_norm_s.shape[1] > 1:
+                self.reg = LGBMRegressor(n_estimators=100, verbose=-1, random_state=42)
+                self.reg.fit(np.delete(X_norm_s, 0, axis=1), X_norm_s[:, 0])
+                preds = self.reg.predict(np.delete(X_norm_s, 0, axis=1))
+                errs = np.abs(X_norm_s[:, 0] - preds)
+                self.qt.fit(errs.reshape(-1, 1))
+        else:
+            cont = 0.05 if self.domain == 'logic' else 0.1
+            self.iso = IsolationForest(contamination=cont, random_state=42, n_jobs=-1)
+            self.iso.fit(X_norm_s)
+            errs = 0.5 - self.iso.decision_function(X_norm_s)
+            self.qt.fit(errs.reshape(-1, 1))
 
+    # 従来の0/1判定
     def predict(self, X):
+        score = self.predict_score(X)
+        return (score > 0.5).astype(int)
+
+    # 【新機能】信頼度(確率)をそのまま返すメソッド
+    def predict_score(self, X):
         X_eng = self.engineer.process(X, self.domain)
         X_eng = X_eng.reindex(columns=self.features_, fill_value=0)
         X_s = self.scaler.transform(X_eng)
         
-        # 【重要修正】System 1 (Classifier) を全面的に信頼する
-        # Ablation StudyでF1=1.0が出ている最強のモデルなので、
-        # 余計な後処理や補正をせず、そのまま使うのが正解。
-        
+        # AIの自信満々度 (0.0 ~ 1.0)
         s_clf = self.clf.predict_proba(X_s)[:, 1]
-        
-        # 確率0.5以上なら異常とみなす（シンプル・イズ・ベスト）
-        return (s_clf > 0.5).astype(int)
+        return s_clf
