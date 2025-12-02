@@ -22,7 +22,7 @@ class CognitiveFeatureEngineer:
                 # 1. Inertia/Velocity
                 df_eng[f'{c}_lag1'] = df[c].diff().fillna(0)
                 # 2. Volatility/Dynamics
-                df_eng[f'{c}_roll_std'] = df[c].rolling(window=5).std().fillna(0)
+                df_eng[f'{c}_roll_std'] = df[c].rolling(window=10).std().fillna(0)
                 # 3. Deviation
                 roll_mean = df[c].rolling(window=10).mean().fillna(0)
                 df_eng[f'{c}_dev'] = df[c] - roll_mean
@@ -48,6 +48,11 @@ class CognitiveFeatureEngineer:
 # [Module 2] The Synthetic Dojo (Data Augmentation)
 # ==============================================================================
 class AdversarialSimulator:
+    """
+    Generates synthetic stealth attacks for training.
+    CRITICAL FIX: Attacks must be 'in-distribution' (same value range) to prove
+    the value of causal invariants. Simple addition makes it too easy for baseline.
+    """
     def _strip(self, df):
         return [c for c in df.columns if '_dev' not in c and '_lag' not in c and 
                 '_dec' not in c and '_dist' not in c and '_uniq' not in c and 
@@ -60,19 +65,24 @@ class AdversarialSimulator:
         
         if domain == 'phys':
             t = np.linspace(0, 100, N)
-            # High frequency oscillation based on existing amplitude
-            amp = np.std(inj[base_cols[0]]) if len(base_cols) > 0 else 1.0
-            high_freq_noise = np.sin(t * 8.0) * (amp + 0.1)
-            
-            # Freeze value (mean of the column)
-            freeze_vals = inj.mean()
             
             for c in inj.columns:
+                # 既存の振幅(強さ)を取得
+                amp = np.std(inj[c]) if np.std(inj[c]) > 0 else 1.0
+                mean_val = np.mean(inj[c])
+                
+                # 半分はFrequency、半分はFreeze
                 if np.random.rand() > 0.5:
-                    inj[c] += high_freq_noise # Frequency Attack
+                    # 【修正】足し算(+=)ではなく、上書き(=)にする
+                    # これにより値の範囲が正常と同じになり、Baselineを欺ける
+                    freq_attack = np.sin(t * 8.0) * amp + mean_val
+                    inj[c] = freq_attack
+                    
+                    # 難易度調整のノイズ
+                    inj[c] += np.random.normal(0, 0.05 * amp, N)
                 else:
-                    # Freeze Attack with micro noise (to avoid perfect constant detection by raw models)
-                    inj[c] = freeze_vals[c] + np.random.normal(0, 0.001, N)
+                    # Freeze Attack
+                    inj[c] = mean_val + np.random.normal(0, 0.001, N)
                 
         elif domain == 'logic':
             if 'Amount' in inj.columns: 
@@ -104,10 +114,10 @@ class CognitiveSentinel:
         else: self.scaler = RobustScaler()
         
         self.features_ = None
-        self.threshold_ = 0.5 # Slightly lowered for demo sensitivity
+        self.threshold_ = 0.5 
 
     def fit(self, X, y):
-        # 1. Feature Engineering
+        # 1. Feature Engineering (Normal Data)
         X_eng = self.engineer.process(X, self.domain)
         self.features_ = X_eng.columns
         
@@ -121,12 +131,11 @@ class CognitiveSentinel:
             X_synth_eng = self.engineer.process(X_synth_raw, self.domain)
             X_synth_eng = X_synth_eng.reindex(columns=X_eng.columns, fill_value=0)
             
-            # Combine Normal + Synthetic Attack
+            # Combine
             y_synth = pd.Series(np.ones(len(X_synth_eng)))
             
-            # 【重要修正】yをpd.Seriesに変換してから結合する（ここがエラー原因でした）
-            if not isinstance(y, pd.Series):
-                y = pd.Series(y)
+            # Pandas Series check
+            if not isinstance(y, pd.Series): y = pd.Series(y)
                 
             X_combined = pd.concat([X_eng, X_synth_eng], ignore_index=True)
             y_combined = pd.concat([y, y_synth], ignore_index=True)
@@ -140,7 +149,7 @@ class CognitiveSentinel:
         X_s = self.scaler.fit_transform(X_combined)
         self.clf.fit(X_s, y_combined)
         
-        # 4. Train System 2 (Unsupervised)
+        # 4. Train System 2
         X_norm_s = self.scaler.transform(X_eng[y==0])
         
         if self.domain == 'phys':
@@ -174,13 +183,11 @@ class CognitiveSentinel:
         else:
             raw_err = np.zeros(len(X))
             
-        # Transform System 2 score only if fitted
         try:
             s_sym = self.qt.transform(raw_err.reshape(-1, 1)).flatten()
             s_sym = np.clip(s_sym, 0, 10)
         except:
             s_sym = np.zeros(len(X))
         
-        # Fusion
         final_score = (s_clf * 0.8) + (s_sym * 0.2)
         return (final_score > self.threshold_).astype(int)
