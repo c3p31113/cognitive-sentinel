@@ -1,9 +1,24 @@
 # ==============================================================================
 # Product Prototype: Cognitive Sentinel Live Monitor
 # ==============================================================================
-# 目的: CSVに依存せず、リアルタイムに流れてくるデータ（ストリーム）を
-#       1件ずつ処理し、異常を即時判定する「製品版」のモックアップ。
+# 目的: リアルタイムデータストリームに対する異常検知デモンストレーション。
+#       ユーザーに分かりやすいログ出力と、内部状態の可視化を行います。
 # ==============================================================================
+
+import sys
+import os
+import time
+import warnings
+
+# ---------------------------------------------------------
+# [System Config]
+# 警告の抑制とパスの設定
+# ---------------------------------------------------------
+# デモの見た目を損なう内部ライブラリの警告（FutureWarning等）を抑制
+warnings.filterwarnings("ignore")
+
+# モジュール読み込み用のパス設定
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 import pandas as pd
@@ -14,66 +29,110 @@ class LiveMonitor:
     def __init__(self, domain='phys', window_size=20):
         self.domain = domain
         self.sentinel = CognitiveSentinel(domain=domain)
-        self.buffer = deque(maxlen=window_size) # ストリーム用バッファ
+        self.buffer = deque(maxlen=window_size) 
+        self.window_size = window_size
         self.is_ready = False
+        print(f"⚙️  [Init] Monitor initialized for domain: '{domain}'")
 
     def load_model(self, X_train, y_train):
         """
-        初期化：正常な環境データを読み込んで「基準」を作る
-        （実運用では、最初の1時間は学習モード、その後監視モードにする等）
+        初期化フェーズ: 正常データを学習し、システムの基準を作る
         """
-        print(f"🔵 [System] Calibrating for {self.domain} environment...")
+        print("-" * 60)
+        print("📥 [Calibration] Loading historical data for calibration...")
+        print(f"   -> Training Data Size: {len(X_train)} samples")
+        
+        # 学習実行
+        # ※Dojo生成に失敗しても元のデータで学習を継続する仕様
         self.sentinel.fit(X_train, y_train)
+        
         self.is_ready = True
-        print("🟢 [System] System Armed. Ready to detect.")
+        print("✅ [Ready] System Calibrated. Invariants extracted.")
+        print("-" * 60 + "\n")
 
-    def process_stream(self, incoming_data_point):
+    def process_stream(self, value):
         """
-        リアルタイム処理：データが1件来るたびに判定する
-        input: {'Sensor': 0.5, ...} (辞書型)
+        リアルタイム処理: 1件ずつデータを受け取り判定する
         """
-        if not self.is_ready: return "Initializing..."
+        if not self.is_ready:
+            print("⚠️ [Error] System not armed. Run load_model() first.")
+            return
 
-        # 1. バッファに追加（時系列の特徴量を作るため）
-        self.buffer.append(incoming_data_point)
-        if len(self.buffer) < 5: return "Buffering..." # データが溜まるまで待機
-
-        # 2. DataFrameに変換（1行だけのDF）
-        df_current = pd.DataFrame(list(self.buffer))
+        # 1. データを辞書型からDataFrameに変換するための準備
+        # 入力が単一の数値の場合を想定
+        current_data = {'Sensor': value}
         
-        # 3. 最新の1行だけを判定
-        # (sentinel内部で特徴量計算 -> 判定まで一気に行う)
-        # ※最新行の判定には過去のバッファが必要なのでdf_currentを渡す
-        pred = self.sentinel.predict(df_current)[-1] 
+        # 2. バッファに追加
+        self.buffer.append(current_data)
         
-        if pred == 1:
-            return "🚨 ALERT: Anomaly Detected!"
-        else:
-            return "✅ Normal"
+        # バッファ状況の表示
+        buffer_status = f"[{len(self.buffer)}/{self.window_size}]"
+        
+        # 3. データが溜まるまでは待機
+        if len(self.buffer) < self.window_size:
+            print(f"⏳ {buffer_status} Buffering data... (Value: {value:.2f})")
+            return "Buffering"
 
-# --- デモ実行 (Usage Example) ---
+        # 4. 推論実行
+        # 最新のウィンドウ（バッファ全体）をDataFrameに変換
+        df_window = pd.DataFrame(list(self.buffer))
+        
+        try:
+            # sentinel.predict は 0(正常) か 1(異常) を返す
+            # 最新のデータポイントに対する判定を取得
+            pred = self.sentinel.predict(df_window)[-1]
+            
+            if pred == 1:
+                msg = f"🚨 [ALERT] ANOMALY DETECTED! Value: {value:.2f} (Physical Violation)"
+                print(msg)
+                return "Anomaly"
+            else:
+                msg = f"🟢 [Normal] System Stable.   Value: {value:.2f}"
+                print(msg)
+                return "Normal"
+                
+        except Exception as e:
+            print(f"❌ [Error] Inference failed: {e}")
+            return "Error"
+
+# --- メイン実行部 (デモンストレーション) ---
 if __name__ == "__main__":
-    # 1. 仮想のセンサー (サーバーCPU温度計だとする)
-    monitor = LiveMonitor('phys')
+    print("\n" + "="*60)
+    print("   🛡️  COGNITIVE SENTINEL - LIVE MONITOR PROTOTYPE  🛡️")
+    print("="*60 + "\n")
+
+    # 1. インスタンス生成
+    monitor = LiveMonitor(domain='phys', window_size=5)
     
-    # 2. 学習フェーズ (正常な環境音を聞かせる)
-    # 本来は過去ログなどを食わせる
-    print("\n--- Phase 1: Learning Normal Behavior ---")
-    dummy_train = pd.DataFrame({'Sensor': np.random.normal(50, 5, 1000)})
-    monitor.load_model(dummy_train, np.zeros(1000))
+    # 2. 学習フェーズ (キャリブレーション)
+    # 正常なセンサーデータ(平均50, 標準偏差5)を1000件生成して学習
+    dummy_train = pd.DataFrame({'Sensor': np.random.normal(50, 2, 1000)})
+    dummy_labels = np.zeros(1000)
+    monitor.load_model(dummy_train, dummy_labels)
     
-    # 3. 運用フェーズ (データが1秒に1回来ると想定)
-    print("\n--- Phase 2: Real-time Monitoring ---")
+    # 3. 監視フェーズ開始
+    print("▶️  Starting Real-time Monitoring Stream...\n")
+    time.sleep(1)
+
+    # シナリオA: 正常な通信 (Normal)
+    print("--- [Scenario 1] Normal Operation ---")
+    normal_values = [48.5, 51.2, 49.8, 50.5, 49.1, 50.3]
+    for v in normal_values:
+        monitor.process_stream(v)
+        time.sleep(0.2) # リアルタイム感を出すウェイト
+
+    print("\n")
     
-    # 正常なデータが流れてくる...
-    for i in range(3):
-        val = np.random.normal(50, 5)
-        status = monitor.process_stream({'Sensor': val})
-        print(f"Input: {val:.2f} -> {status}")
-        
-    # 突然、攻撃発生！ (Freeze攻撃: 値が固まる)
-    print("\n!! ATTACK STARTED !!")
-    fixed_val = 52.0
-    for i in range(3):
-        status = monitor.process_stream({'Sensor': fixed_val})
-        print(f"Input: {fixed_val:.2f} -> {status}")
+    # シナリオB: 攻撃発生 (Freeze Attack / 値の固定)
+    # 値自体は「50.0」で正常範囲内だが、「変動がない」ため物理法則違反となる
+    print("--- [Scenario 2] Attack Injection (Freeze Attack) ---")
+    print("   ! Intruder injects fixed value to spoof sensor...")
+    attack_values = [50.0, 50.0, 50.0, 50.0, 50.0, 50.0] 
+    
+    for v in attack_values:
+        monitor.process_stream(v)
+        time.sleep(0.2)
+
+    print("\n" + "="*60)
+    print("🏁 Demo Session Complete.")
+    print("="*60)
