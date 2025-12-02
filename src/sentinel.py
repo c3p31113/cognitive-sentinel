@@ -11,45 +11,34 @@ warnings.filterwarnings("ignore")
 # [Module 1] The Prefrontal Cortex (Feature Engineering / System 2)
 # ==============================================================================
 class CognitiveFeatureEngineer:
-    """
-    System 2: Extracts Causal Invariants from raw data.
-    CRITICAL: This must be applied BEFORE any data shuffling to preserve temporal dynamics.
-    """
     def process(self, df, domain):
         df_eng = df.copy()
         numeric_cols = df.select_dtypes(include=[np.number]).columns
         
         if domain == 'phys':
             # Physics: Inertia (Speed) & Volatility (Vibration)
-            # Ablation Studyで証明された重要特徴量: diff(速度) と rolling_std(振動)
             base_cols = [c for c in numeric_cols if 'lag' not in c and 'roll' not in c and 'anomaly' not in c]
             for c in base_cols:
-                # 1. Inertia/Velocity: 物理量は急に値が飛ばない (Lipschitz)
+                # 1. Inertia/Velocity
                 df_eng[f'{c}_lag1'] = df[c].diff().fillna(0)
-                
-                # 2. Volatility/Dynamics: 物理量は常に揺らいでいる (Dynamic Consistency)
-                # Freeze攻撃(std=0)やFrequency攻撃(std高)を検知
-                df_eng[f'{c}_roll_std'] = df[c].rolling(window=10).std().fillna(0)
-                
-                # 3. Deviation: 予測からの乖離
+                # 2. Volatility/Dynamics
+                df_eng[f'{c}_roll_std'] = df[c].rolling(window=5).std().fillna(0)
+                # 3. Deviation
                 roll_mean = df[c].rolling(window=10).mean().fillna(0)
                 df_eng[f'{c}_dev'] = df[c] - roll_mean
 
         elif domain == 'logic':
-            # Logic: Statistical Laws (Benford/Salami)
             if 'Amount' in df.columns:
                 df_eng['Amt_dec'] = df['Amount'] % 1
                 df_eng['Amt_dist_int'] = np.abs(0.5 - (df['Amount'] % 1))
                 df_eng['Amt_log'] = np.log1p(df['Amount'])
 
         elif domain == 'cyber':
-            # Cyber: Mechanical Regularity (Beacon)
             targets = ['Total Length of Fwd Packets', 'Flow Duration']
             for c in targets:
                 if c in df.columns:
                     window_size = 20
                     def nunique_ratio(x): return len(np.unique(x)) / len(x)
-                    # Note: rolling apply is slow, but necessary for entropy calculation
                     df_eng[f'{c}_uniq20'] = df[c].rolling(window=window_size).apply(nunique_ratio, raw=True).fillna(1)
                     df_eng[f'{c}_std20'] = df[c].rolling(window=window_size).std().fillna(0)
 
@@ -59,12 +48,7 @@ class CognitiveFeatureEngineer:
 # [Module 2] The Synthetic Dojo (Data Augmentation)
 # ==============================================================================
 class AdversarialSimulator:
-    """
-    Generates synthetic stealth attacks for training (Supervised Training).
-    This teaches the model 'what a violation of physics looks like'.
-    """
     def _strip(self, df):
-        # Remove engineered features to get back to raw state for injection
         return [c for c in df.columns if '_dev' not in c and '_lag' not in c and 
                 '_dec' not in c and '_dist' not in c and '_uniq' not in c and 
                 '_roll' not in c and '_std' not in c and '_log' not in c]
@@ -75,27 +59,26 @@ class AdversarialSimulator:
         N = len(inj)
         
         if domain == 'phys':
-            # 1. Frequency Attack (High Vibration) - from Ablation Study
             t = np.linspace(0, 100, N)
-            high_freq_noise = np.sin(t * 8.0) * 0.5 # High frequency oscillation
+            # High frequency oscillation based on existing amplitude
+            amp = np.std(inj[base_cols[0]]) if len(base_cols) > 0 else 1.0
+            high_freq_noise = np.sin(t * 8.0) * (amp + 0.1)
             
-            # 2. Freeze Attack (Zero Dynamics)
-            freeze_val = inj.mean() # Fixed value
+            # Freeze value (mean of the column)
+            freeze_vals = inj.mean()
             
-            # Randomly apply either Freeze or Frequency attack
             for c in inj.columns:
                 if np.random.rand() > 0.5:
-                    inj[c] += high_freq_noise # Violates Inertia
+                    inj[c] += high_freq_noise # Frequency Attack
                 else:
-                    inj[c] = freeze_val[c] + np.random.normal(0, 0.001, N) # Violates Dynamics (almost zero std)
+                    # Freeze Attack with micro noise (to avoid perfect constant detection by raw models)
+                    inj[c] = freeze_vals[c] + np.random.normal(0, 0.001, N)
                 
         elif domain == 'logic':
-            # Smudged Salami
             if 'Amount' in inj.columns: 
                 inj['Amount'] += np.random.uniform(0.01, 0.99, size=len(inj))
                 
         elif domain == 'cyber':
-            # Jittery Beacon (Regularity Violation)
             for i in range(0, len(inj), 10):
                 if 'Total Length of Fwd Packets' in inj.columns: 
                     inj.iloc[i, inj.columns.get_loc('Total Length of Fwd Packets')] = 77.0
@@ -112,73 +95,62 @@ class CognitiveSentinel:
         self.domain = domain
         self.engineer = CognitiveFeatureEngineer()
         self.simulator = AdversarialSimulator()
-        
-        # System 1: Causal-Informed Classifier
         self.clf = LGBMClassifier(n_estimators=200, verbose=-1, random_state=42)
-        
-        # System 2: Anomaly Scorers (Regressor / IsolationForest)
         self.reg = None
         self.iso = None
         self.qt = QuantileTransformer(output_distribution='normal', random_state=42)
+        
         if domain == 'logic': self.scaler = MinMaxScaler()
         else: self.scaler = RobustScaler()
         
         self.features_ = None
-        self.threshold_ = 0.8 # Default threshold
+        self.threshold_ = 0.5 # Slightly lowered for demo sensitivity
 
     def fit(self, X, y):
-        """
-        Training Pipeline:
-        1. Feature Engineering (on Raw Data) -> Preserves Causal Dynamics
-        2. Data Augmentation (Synthetic Dojo) -> Teaches Violations
-        3. System 1 & 2 Training
-        """
-        # 1. Feature Engineering (Normal Data)
+        # 1. Feature Engineering
         X_eng = self.engineer.process(X, self.domain)
         self.features_ = X_eng.columns
         
-        # 2. Synthetic Dojo (Augmentation)
-        # We generate attacks based on raw normal data, THEN engineer features.
-        # This ensures the 'attack features' (like high velocity) are correctly calculated.
-        X_raw_only = X[y==0].copy() # Get only normal samples to corrupt
+        # 2. Synthetic Dojo
+        X_norm_raw = X[y==0].copy()
         
         try:
             # Generate Attack Raw Data
-            X_synth_raw = self.simulator.inject_attack(X_raw_only, self.domain)
-            # Extract Causal Features from Attack Data
+            X_synth_raw = self.simulator.inject_attack(X_norm_raw, self.domain)
+            # Extract Features
             X_synth_eng = self.engineer.process(X_synth_raw, self.domain)
             X_synth_eng = X_synth_eng.reindex(columns=X_eng.columns, fill_value=0)
             
             # Combine Normal + Synthetic Attack
             y_synth = pd.Series(np.ones(len(X_synth_eng)))
-            X_combined = pd.concat([X_eng, X_synth_eng])
-            y_combined = pd.concat([y, y_synth])
+            
+            # 【重要修正】yをpd.Seriesに変換してから結合する（ここがエラー原因でした）
+            if not isinstance(y, pd.Series):
+                y = pd.Series(y)
+                
+            X_combined = pd.concat([X_eng, X_synth_eng], ignore_index=True)
+            y_combined = pd.concat([y, y_synth], ignore_index=True)
             
         except Exception as e:
             print(f"Warning: Dojo generation failed ({e}). Training on provided data only.")
             X_combined = X_eng
             y_combined = y
             
-        # 3. Train System 1 (Causal-Informed Classifier)
+        # 3. Train System 1
         X_s = self.scaler.fit_transform(X_combined)
         self.clf.fit(X_s, y_combined)
         
-        # 4. Train System 2 (Unsupervised Baseline for Hybrid Scoring)
+        # 4. Train System 2 (Unsupervised)
         X_norm_s = self.scaler.transform(X_eng[y==0])
         
         if self.domain == 'phys':
-            # Regressor for Physics (Predict next state)
-            # Predict X[t] based on X[t-1]... (Simplified for demo)
-            self.reg = LGBMRegressor(n_estimators=100, verbose=-1, random_state=42)
-            # Train to map features to target (Self-Supervised)
-            self.reg.fit(np.delete(X_norm_s, 0, axis=1), X_norm_s[:, 0])
-            
-            preds = self.reg.predict(np.delete(X_norm_s, 0, axis=1))
-            errs = np.abs(X_norm_s[:, 0] - preds)
-            self.qt.fit(errs.reshape(-1, 1))
-            
+            if X_norm_s.shape[1] > 1:
+                self.reg = LGBMRegressor(n_estimators=100, verbose=-1, random_state=42)
+                self.reg.fit(np.delete(X_norm_s, 0, axis=1), X_norm_s[:, 0])
+                preds = self.reg.predict(np.delete(X_norm_s, 0, axis=1))
+                errs = np.abs(X_norm_s[:, 0] - preds)
+                self.qt.fit(errs.reshape(-1, 1))
         else:
-            # IsoForest for Logic/Cyber
             cont = 0.05 if self.domain == 'logic' else 0.1
             self.iso = IsolationForest(contamination=cont, random_state=42, n_jobs=-1)
             self.iso.fit(X_norm_s)
@@ -186,26 +158,29 @@ class CognitiveSentinel:
             self.qt.fit(errs.reshape(-1, 1))
 
     def predict(self, X):
-        # 1. Feature Engineering
         X_eng = self.engineer.process(X, self.domain)
         X_eng = X_eng.reindex(columns=self.features_, fill_value=0)
         X_s = self.scaler.transform(X_eng)
         
-        # 2. System 1 Prediction (Supervised)
+        # System 1
         s_clf = self.clf.predict_proba(X_s)[:, 1]
         
-        # 3. System 2 Prediction (Unsupervised / Residual)
-        if self.domain == 'phys':
+        # System 2
+        if self.domain == 'phys' and self.reg is not None:
             pred = self.reg.predict(np.delete(X_s, 0, axis=1))
             raw_err = np.abs(X_s[:, 0] - pred)
-        else:
+        elif self.iso is not None:
             raw_err = 0.5 - self.iso.decision_function(X_s)
+        else:
+            raw_err = np.zeros(len(X))
             
-        s_sym = self.qt.transform(raw_err.reshape(-1, 1)).flatten()
-        s_sym = np.clip(s_sym, 0, 10)
+        # Transform System 2 score only if fitted
+        try:
+            s_sym = self.qt.transform(raw_err.reshape(-1, 1)).flatten()
+            s_sym = np.clip(s_sym, 0, 10)
+        except:
+            s_sym = np.zeros(len(X))
         
-        # 4. Hybrid Score Fusion
-        # System 1 is weighted higher due to Causal Dojo training
-        final_score = (s_clf * 0.8) + (s_sym * 0.2) 
-        
-        return (final_score > 0.5).astype(int) # Simple threshold for demo
+        # Fusion
+        final_score = (s_clf * 0.8) + (s_sym * 0.2)
+        return (final_score > self.threshold_).astype(int)
