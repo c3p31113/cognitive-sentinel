@@ -639,9 +639,9 @@ python experiments/reproduce_ablation.py
 
 **期待される出力:**
 
-  * **Baseline F1-Score:** 0.50 付近（ランダム）
+  * **Baseline F1-Score:** 0.5〜0.7付近（ランダム）
       * *解釈:* 値の範囲が正常であるため、生データのみでは検知不能。
-  * **Proposed F1-Score:** 0.85 - 1.00
+  * **Proposed F1-Score:** 0.95以上
       * *解釈:* 速度や振動の不変量を捉えることで、動的な異常を検知成功。
 
 ### 2\. リアルタイム検知デモの実行
