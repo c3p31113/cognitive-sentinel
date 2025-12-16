@@ -2,15 +2,18 @@
 
 **(コグニティブ・センチネル：マルチモーダルCPSにおける、因果的不変量に基づく因果・統計ハイブリッド侵入検知システム)**
 
-## 0\. Abstract (要旨)
+## Abstract (要旨)
 
 **Background:**
-現代の重要インフラ（Cyber-Physical Systems: CPS）に対する攻撃は、正常データの統計的モーメント（平均・分散・相関）を精巧に模倣する **"In-distribution Attacks"（分布内攻撃）** へと進化している。従来の深層学習（Deep Learning）や統計的異常検知（Isolation Forest等）は、観測データの **「相関関係（Correlation）」** に依存する多様体仮説に基づいているため、物理的・論理的な **「因果律（Causality）」** を無視したこれらの攻撃（Slow Drift, GAN Mimicry, Sensor Freeze）に対し、原理的な検知限界（False Negative）を抱えていた。
+
+現代の重要インフラ（Cyber-Physical Systems: CPS）に対するサイバー攻撃は、正常データの統計的モーメント（平均・分散・相関）を精巧に模倣する **"In-distribution Attacks"（分布内攻撃）** へと進化している。従来の深層学習（Deep Learning）や統計的異常検知（Isolation Forest等）は、観測データの **「相関関係（Correlation）」** に依存する多様体仮説に基づいている。そのため、物理的・論理的な **「因果律（Causality）」** を無視しつつも統計的には正常に見せかける攻撃（Slow Drift, GAN Mimicry, Sensor Freeze等）に対し、原理的な検知限界（False Negative）を抱えていた。
 
 **Methodology:**
-本研究は、**「攻撃者はデータ値を統計的に偽装できても、システムの背後にある物理法則（慣性）や商習慣（エントロピー）といった因果構造までは、リアルタイムかつ低コストで模倣不可能である」** という仮説に基づき、ドメイン知識を機械学習モデルに注入する **Causal-Informed Hybrid Architecture** を提案する。我々は、物理的慣性、経済的エントロピー、および機械的律動性を **「因果的不変量（Causal Invariants）」** として定式化し、これらを監視する軽量な勾配ブースティング決定木（GBDT）モデルを構築した。
+
+本研究は、**「攻撃者はデータ値を統計的に偽装できても、システムの背後にある物理法則（慣性）や商習慣（エントロピー）といった因果構造までは、リアルタイムかつ低コストで模倣不可能である」** という仮説に基づく。この仮説を立証するため、ドメイン知識を機械学習モデルに注入する **Causal-Informed Hybrid Architecture** を提案する。我々は、物理的慣性、経済的エントロピー、および機械的律動性を **「因果的不変量（Causal Invariants）」** として定式化し、これらを特徴量として監視する軽量な勾配ブースティング決定木（GBDT）モデルを構築した。
 
 **Results:**
+
 5つの公開データセット（SKAB, Credit Card, CTU-13, CIC-IDS2017, UNSW-NB15）を用いた計166,690サンプルの評価において、本手法は以下の成果を達成した：
 
 1.  **Accuracy:** 未知のステルス攻撃に対し **F1-Score 0.92** を達成し、SOTA（Deep Autoencoder, OCSVM）を上回る性能を示した。
@@ -24,18 +27,21 @@
 
 ## 1\. Introduction (序論)
 
-### 1.1 The Problem: The "Causality Gap" in Modern IDS
+### 1.1 背景と課題：現代IDSにおける「因果の欠落」
 
-異常検知の分野では、長らく「正常データからの幾何学的距離」が異常の指標とされてきた。Isolation ForestやDeep Autoencoderは、正常データが形成する多様体（Manifold）を学習し、そこからの逸脱を検知する。
-しかし、現代の攻撃手法である **Slow Drift**（物理法則を悪用した緩慢な変化）や **Salami Slicing**（微小な詐取）、そして **Sensor Freeze**（値の固定）は、正常多様体の **内部** に留まりながらシステムを侵害する。これらは「統計的異常（Outlier）」ではないため、純粋なデータ駆動型アプローチでは **「正常なゆらぎ」と「攻撃」を数学的に区別できない**。これが現代セキュリティが直面する「因果の欠落（Causality Gap）」である。
+異常検知の分野では、長らく「正常データからの幾何学的距離」が異常の指標とされてきた [1, 2]。Isolation Forest [3] や Deep Autoencoder [4] といった代表的な手法は、正常データが形成する多様体（Manifold）を学習し、そこからの逸脱を検知することを基本原理としている。
 
-### 1.2 The Solution: Causality over Correlation
+しかし、現代の攻撃手法である **Slow Drift**（物理法則を悪用した緩慢な変化）や **Salami Slicing**（微小な詐取）、そして **Sensor Freeze**（値の固定）は、正常多様体の **内部** に留まりながらシステムを侵害する手法をとる。これらは「統計的異常（Outlier）」として顕在化しないため、純粋なデータ駆動型アプローチでは **「正常なゆらぎ」と「攻撃」を数学的に区別できない** という問題がある。これを本稿では、現代セキュリティが直面する「因果の欠落（Causality Gap）」と定義する。
 
-なぜ純粋なデータ駆動型アプローチは失敗するのか？ その根本原因は、モデルが学習するのが $P(X)$ という「観測分布」に過ぎない点にある。
-攻撃者がGAN（Generative Adversarial Networks）を用いて $P(X)$ を模倣した場合、統計モデルは無力化される。しかし、システムには $P(Y|do(X))$ という **「介入に対する因果的応答」** が存在する。
-例えば、「通信トラフィック（原因）が変動しているのに、CPU温度（結果）が固定されている」という現象は、分布上は正常であっても、物理的因果律（エネルギー保存則）に反している。本研究は、データの「値」ではなく、この **「因果的ダイナミクスとの矛盾」** を検知することで、統計的偽装を無効化する。
+### 1.2 アプローチ：相関から因果への転換
 
-### 1.3 Contributions
+なぜ純粋なデータ駆動型アプローチは失敗するのか。その根本原因は、モデルが学習するのが $P(X)$ という「観測分布」に過ぎない点にある [5]。
+
+攻撃者がGAN（Generative Adversarial Networks）を用いて $P(X)$ を模倣した場合、統計モデルは無力化される。しかし、物理システムには $P(Y|do(X))$ という **「介入に対する因果的応答」** が存在する。例えば、「通信トラフィック（原因）が変動しているのに、CPU温度（結果）が固定されている」という現象は、データの分布上は正常範囲内であっても、物理的因果律（エネルギー保存則や熱力学）に反している。
+
+本研究は、データの「値」そのものではなく、この **「因果的ダイナミクスとの矛盾」** を検知することで、統計的偽装を無効化する手法を提案する。
+
+### 1.3 本研究の貢献
 
 本論文の貢献は以下の通りである。
 
@@ -46,53 +52,90 @@
 
 -----
 
-## 2\. Theoretical Framework (理論的枠組み)
+## 2\. Related Work (関連研究)
 
-本研究の根幹は、CPS（Cyber-Physical Systems）を確率的な相関関係ではなく、決定論的な因果構造を持つシステムとしてモデル化する点にある。我々は、Judea Pearlの構造的因果モデル（SCM）を採用し、システム内の異常を「因果的整合性の破綻」として再定義する。
+本節では、CPSセキュリティにおける主要な研究動向を概観し、本手法（CausalSentinel）の位置付けと優位性を明確にする。
 
-### 2.1 Structural Causal Model (構造的因果モデル)
+### 2.1 深層学習ベースの異常検知とその限界
 
-我々は、対象システムを変数集合 $V = \{C, P, L\}$ を持つ有向非巡回グラフ（DAG）$G = (V, E)$ として定義する。
-ここで、$C$ はサイバー（Cyber Traffic）、$P$ は物理（Physical State: CPU/Power）、$L$ は論理（Logical Outcome: Revenue）を表す。
+近年の異常検知研究は、深層学習（DL）モデルが主流である。代表的な手法として、OmniAnomaly [6]、USAD [7]、TranAD [8]、GDN [9] 等が挙げられる。これらは、オートエンコーダ（AE）やVariational Autoencoder（VAE）、あるいはTransformerを用いて正常データの時系列パターンを学習する。
 
-![causal_graph](/images/causal_graph.png)
+しかし、これらの手法は正常データの **「統計的相関（Correlation）」** を学習することに特化しているという共通の課題を持つ。そのため、攻撃者がGAN等を用いて相関関係を維持したまま攻撃を行う「分布内攻撃（In-distribution Attacks）」に対して脆弱である。事実、本研究の実験において、Deep AutoencoderのF1スコアが0.15に留まったこと（後述の実験結果参照）は、「相関学習だけでは因果的矛盾を検知できない」という限界を示唆している。
+
+### 2.2 セキュリティにおける因果推論の適用
+
+因果推論をセキュリティに応用する試みも近年注目されている。Agarwalら [10] や Zhuら [11] は、ログデータからの因果グラフ構築による根本原因分析（Root Cause Analysis）を提案しており、Arjovskyら [12] はInvariant Risk Minimization (IRM) によるモデルの頑健化を提唱している。
+
+しかし、既存の因果研究の多くは「事後分析（Forensics）」や「静的な画像認識」に焦点を当てており、リアルタイム性が求められるIDS（侵入検知）への応用は限定的であった。また、PCアルゴリズム等の因果探索は計算コストが高く（ $O(d^k)$ ）、リソースの限られたエッジデバイスでの実行には不向きである。本研究は、ドメイン固有の因果知識を「軽量な特徴量」として事前に定式化して実装することで、**推論時間 0.03ms** という実用的な速度を実現した点で、既存研究と一線を画す。
+
+### 2.3 ハイブリッド・ニューロシンボリック手法
+
+Neuro-Symbolic AIは、ニューラルネットワークの学習能力と、論理的推論能力を統合するアプローチである [13]。Logic Tensor Networks (LTN) などが知られているが、論理推論の計算負荷が高く、CPSのような高頻度データストリームへの適用が困難であった。
+
+本研究は、論理制約（不変量）を「特徴量抽出（Feature Extraction）」として切り出し、後段の推論を高速なGBDTに任せる **"Causal-Informed Hybrid Architecture"** を採用することで、解釈性・堅牢性と実用的な速度の両立を図っている。
+
+-----
+
+## 3\. Theoretical Framework (理論的枠組み)
+
+本研究の根幹は、CPS（Cyber-Physical Systems）を確率的な相関関係ではなく、決定論的な因果構造を持つシステムとしてモデル化する点にある。我々は、Judea Pearlの構造的因果モデル（SCM） [5] を採用し、システム内の異常を「因果的整合性の破綻」として再定義する。
+
+### 3.1 Structural Causal Model (構造的因果モデル)
+
+我々は、対象システムを変数集合 $V = \{C, P, L\}$ を持つ有向非巡回グラフ（DAG） $G = (V, E)$ として定義する。ここで、それぞれの変数は以下を表す。
+
+  * $C$ : サイバー（Cyber Traffic）
+  * $P$ : 物理（Physical State: CPU温度や電力消費）
+  * $L$ : 論理（Logical Outcome: 売上やトランザクション数）
+
+
+![Fig1](/images/causal_graph.png)
 
 *(Fig 1: 本研究が定義し、統計的に検証した因果ダイアグラム。Cyberを起点とし、PhysicalおよびLogicalへの因果流が存在する)*
 
 構造方程式（Structural Equations）は以下の通り定義される：
 
 1.  **Cyber Domain (Exogenous Input):**
+
     $$C_t := f_C(U_C)$$
-    通信量は外部需要（外生変数 $U_C$）により決定される。
+
+    通信量は外部需要（外生変数 $U_C$ ）により決定される。
+
 2.  **Physical Domain (Causal Mechanism):**
+
     $$P_t := f_P(C_t, P_{t-1}, U_P)$$
-    物理状態は、現在の通信負荷 $C_t$ と、過去の物理状態 $P_{t-1}$（慣性項）に依存する。
+
+    物理状態は、現在の通信負荷 $C_t$ と、過去の物理状態 $P_{t-1}$ （慣性項）に依存する。この $P_{t-1}$ への依存が、物理システム特有の「慣性」を表している。
+
 3.  **Logical Domain (Causal Outcome):**
+
     $$L_t := f_L(C_t, P_t, U_L)$$
+
     論理的成果（売上等）は、通信活動および物理的稼働の結果として生じる。
 
-### 2.2 Causal Identification & Validation (因果の同定と検証)
+### 3.2 Causal Identification & Validation (因果の同定と検証)
 
-定義したDAGの妥当性を検証するため、シミュレーション環境において `do-calculus` に基づく介入実験（Intervention）を行った。変数 $X$ への介入 $do(X=x)$ が変数 $Y$ の分布に変化を与える場合、因果経路 $X \to Y$ が存在するとみなす。
+定義したDAGの妥当性を検証するため、シミュレーション環境において `do-calculus` に基づく介入実験（Intervention）を行った。変数 $X$ への介入 $do(X=x)$ が変数 $Y$ の分布に変化を与える場合、因果経路 $X \to Y$ が存在するとみなされる。
 
 **Proposition 1 (Validation of Causal Direction):**
+
 実験の結果、以下の平均処置効果（ATE: Average Treatment Effect）が観測された。
 
 $$ATE_{C \to P} = E[P | do(C=High)] - E[P | do(C=Low)] \approx 200.05 \quad (p < 0.001)$$
 
-一方、逆方向の介入 $do(P)$ は $C$ に有意な影響を与えなかった（$ATE_{P \to C} \approx 0$）。
+一方、逆方向の介入 $do(P)$ は $C$ に有意な影響を与えなかった（ $ATE_{P \to C} \approx 0$ ）。
 また、時系列ラグ相関分析においても、Cyber $\to$ Phys (Lag +1) および Cyber $\to$ Logic (Lag +2) の相関が $0.99$ 以上であることが確認された。
 これにより、本モデルの因果的構造が、著者の主観ではなくデータに内在する統計的性質と合致していることが証明された。
 
 -----
 
-## 3\. Methodology: Symbolic Invariant Extraction
+## 4\. Methodology: Symbolic Invariant Extraction (提案手法)
 
-攻撃者がGAN等を用いて統計的分布 $P(V)$ を模倣した場合でも、構造方程式 $F$ に内在する物理的・数学的制約（Invariants）までは模倣できない。本節では、各ドメインにおける不変量を定式化する。
+攻撃者がGAN等を用いて統計的分布 $P(V)$ を模倣した場合でも、構造方程式 $F$ に内在する物理的・数学的制約（Invariants）までは模倣できない。本節では、各ドメインにおいて我々が定義した不変量を解説する。
 
-### 3.1 Physical Invariant: Lipschitz Continuity (物理的慣性)
+### 4.1 Physical Invariant: Lipschitz Continuity (物理的慣性)
 
-物理システムは無限のエネルギーを持たないため、状態変化の速度には上限が存在する。関数 $f_P$ がリプシッツ連続であると仮定すると、任意の時刻 $t_1, t_2$ に対して以下が成立する。
+物理システムは無限のエネルギーを持たないため、状態変化の速度には物理的な上限が存在する。関数 $f_P$ がリプシッツ連続であると仮定すると、任意の時刻 $t_1, t_2$ に対して以下が成立する。
 
 $$|P_{t_1} - P_{t_2}| \le K |t_1 - t_2|$$
 
@@ -101,109 +144,101 @@ $$|P_{t_1} - P_{t_2}| \le K |t_1 - t_2|$$
 
 $$\phi_{phys}(x_t) = \| x_t - \hat{f}(x_{t-1}, \dots, x_{t-w}) \|_2$$
 
-### 3.2 Logical Invariant: Entropic Divergence (エントロピー乖離)
+### 4.2 Logical Invariant: Entropic Divergence (エントロピー乖離)
 
-正常な商取引における数値の端数（Decimal part）は、ベンフォードの法則や心理的価格設定の影響を受け、特定の値に偏る（低エントロピー状態）。一方、**Salami Slicing Attack** において攻撃者が生成する乱数は、一様分布に収束する（最大エントロピー状態）。
+正常な商取引における数値の端数（Decimal part）は、ベンフォードの法則や心理的価格設定の影響を受け、特定の値に偏る傾向がある（低エントロピー状態）。一方、**Salami Slicing Attack** において攻撃者が生成する乱数は、一様分布に収束する（最大エントロピー状態）。
+
 観測データの経験的分布 $\hat{P}$ と、正常時の参照分布 $Q$ とのカルバック・ライブラー情報量（KL Divergence）を定義する。
 
 $$\phi_{logic}(x_t) = D_{KL}(\hat{P}_W \| Q) = \sum_{z \in W} \hat{P}(z) \log \frac{\hat{P}(z)}{Q(z)}$$
 
-ウィンドウ $W$ 内の分布がランダム化されるほど、$\phi_{logic}$ は増大する。
+ウィンドウ $W$ 内の分布がランダム化されるほど、この $\phi_{logic}$ は増大し、異常として検知される。
 
-### 3.3 Cyber Invariant: Algorithmic Regularity (アルゴリズム的規則性)
+### 4.3 Cyber Invariant: Algorithmic Regularity (アルゴリズム的規則性)
 
 ボットネットによる通信（**C2 Beaconing**）は、プログラムによって生成されるため、人間による操作と比較して情報の多様性（Shannon Entropy）が低い。
 攻撃者が検知回避のためにジッター（Jitter）を付加したとしても、通信サイズや間隔の分散（Variance）を人間のレベルまで高めることは、通信効率の低下を招くため困難である（Cost Asymmetry）。
+
 我々は、ウィンドウ $W$ 内のユニーク値の集合 $S_u$ の比率を用いて、正規化された規則性スコアを定義する。
 
 $$\phi_{cyber}(x_t) = 1 - \frac{|S_u|}{|W|}$$
 
 -----
 
-## 4\. Implementation Details (実装の詳細)
+## 5\. Implementation Details (実装の詳細)
 
-本章では、第3章で定義された理論的枠組みを、実用的な侵入検知システムとして実装するためのアーキテクチャとアルゴリズムについて詳述する。
+本章では、前章で定義された理論的枠組みを、実用的な侵入検知システムとして実装するためのアーキテクチャとアルゴリズムについて詳述する。
 
-### 4.1 Causal-Informed Hybrid Architecture
+### 5.1 Causal-Informed Hybrid Architecture
 
 提案手法は、以下の2つのレイヤーが直列に結合されたハイブリッド構造を持つ。
 
 1.  **Symbolic Layer (Feature Engineering):**
+
     入力データ $X_t$ に対し、ドメイン固有の不変量関数 $\Phi(\cdot)$ を適用し、不変量ベクトル $V_t = \Phi(X_t)$ を生成する。このプロセスは決定論的であり、学習パラメータを持たない。
 
     $$V_t = [\phi_{phys}(X_t), \phi_{logic}(X_t), \phi_{cyber}(X_t)]$$
 
 2.  **Statistical Layer (Inference Model):**
+
     元の特徴量 $X_t$ と不変量ベクトル $V_t$ を結合した $Z_t = [X_t, V_t]$ を入力とし、**LightGBM (Gradient Boosting Decision Tree)** 分類器が異常確率 $P(y=1|Z_t)$ を算出する。
 
-      * *Rationale:* GBDTを採用した理由は、不変量の「閾値的な境界（例: $r_t > \epsilon$）」を決定木の分岐として捉えるのに適しており、かつ推論計算量が $O(Depth)$ と極めて低くエッジ実装に適しているためである。
+    *Rationale:* GBDTを採用した理由は、不変量の「閾値的な境界（例: $r_t > \epsilon$ ）」を決定木の分岐として捉えるのに適しており、かつ推論計算量が $O(Depth)$ と極めて低くエッジ実装に適しているためである。
 
-### 4.2 Algorithm 1: The Synthetic Dojo (Adversarial Data Augmentation)
+### 5.2 Algorithm 1: The Synthetic Dojo (Adversarial Data Augmentation)
 
-教師なし学習（Unsupervised Learning）は決定境界の曖昧さに、教師あり学習（Supervised Learning）は異常ラベルの欠如に課題がある。
-このジレンマを解消するため、我々は正常データから理論的な攻撃パターンを生成し、分類器を事前学習させる **"Synthetic Dojo"** アルゴリズムを提案する。
+教師なし学習（Unsupervised Learning）は決定境界の曖昧さに、教師あり学習（Supervised Learning）は異常ラベルの欠如に課題がある。このジレンマを解消するため、我々は正常データから理論的な攻撃パターンを生成し、分類器を事前学習させる **"Synthetic Dojo"** アルゴリズムを提案する。
 
 **Robustness of Synthetic Training:**
-自作データへの過学習（Overfitting）に対し、我々は以下の設計により汎化性能を担保した。
 
-  * **Parameter Randomization:** 攻撃パラメータ（Drift係数 $\alpha$、Smudge誤差 $\delta$）を固定値ではなく確率分布からサンプリングすることで、モデルが特定の攻撃パターンではなく「法則違反の構造」を学習するようにした。
+自作データへの過学習（Overfitting）を防ぐため、我々は以下の設計により汎化性能を担保した。
+
+  * **Parameter Randomization:** 攻撃パラメータ（Drift係数 $\alpha$ 、Smudge誤差 $\delta$ ）を固定値ではなく確率分布からサンプリングすることで、モデルが特定の攻撃パターンではなく「法則違反の構造」を学習するようにした。
   * **Zero-Shot Validation:** 学習時には一切使用していない攻撃パターン（CIC-IDS2017のBruteForce等）に対する検知率（Recall 76.8%）は、Dojoが特定の攻撃シグネチャではなく、普遍的な異常検知ロジックを獲得したことの証左である。
 
-> **Algorithm 1: Synthetic Stealth Injection**
->
-> **Input:** Clean Dataset $D_{norm}$, Injection Rate $\rho$
-> **Output:** Augmented Training Set $D_{train}$
->
-> 1: $D_{aug} \leftarrow \emptyset$
->
-> 2: **for** each sample $x_i \in D_{norm}$ **do**
->
-> 3:      Draw $u \sim Uniform(0, 1)$
->
-> 4:      **if** $u < \rho$ **then**
->
-> 5:          Select Attack Type $A \in \{Drift, Salami, Beacon, Freeze\}$
->
-> 6:          **if** $A = Drift$ **then**
->
-> 7:              $x'_i \leftarrow x_i + \alpha \cdot t$ \\quad *(Violates Lipschitz Continuity)*
->
-> 8:          **else if** $A = Freeze$ **then**
->
-> 9:              $x'_i \leftarrow x_{fixed}$ \\quad *(Violates Dynamic Consistency)*
->
-> 10:         **else if** $A = Salami$ **then**
->
-> 11:             $x'_i \leftarrow \lfloor x_i \rfloor + \delta, \delta \sim U(0,1)$ \\quad *(Violates Entropic Divergence)*
->
-> 12:         **else if** $A = Beacon$ **then**
->
-> 13:             $x'_i \leftarrow \text{Constant}(x_i)$ \\quad *(Violates Algorithmic Regularity)*
->
-> 14:         Add $(x'_i, 1)$ to $D_{aug}$
->
-> 15:      **else**
->
-> 16:          Add $(x_i, 0)$ to $D_{aug}$
->
-> 17: **return** $D_{norm} \cup D_{aug}$
+<!-- end list -->
+
+```text
+Algorithm 1: Synthetic Stealth Injection
+
+Input: Clean Dataset D_norm, Injection Rate rho
+Output: Augmented Training Set D_train
+
+1: D_aug <- empty set
+2: for each sample x_i in D_norm do
+3:     Draw u ~ Uniform(0, 1)
+4:     if u < rho then
+5:         Select Attack Type A from {Drift, Salami, Beacon, Freeze}
+6:         if A = Drift then
+7:             x'_i <- x_i + alpha * t      // Violates Lipschitz Continuity
+8:         else if A = Freeze then
+9:             x'_i <- x_fixed              // Violates Dynamic Consistency
+10:        else if A = Salami then
+11:            x'_i <- floor(x_i) + delta, delta ~ U(0,1) // Violates Entropic Divergence
+12:        else if A = Beacon then
+13:            x'_i <- Constant(x_i)        // Violates Algorithmic Regularity
+14:        Add (x'_i, 1) to D_aug
+15:    else
+16:        Add (x_i, 0) to D_aug
+17: return D_norm union D_aug
+```
 
 このアルゴリズムにより、モデルは「正常データの分布」だけでなく、「因果律違反のパターン」を明示的に学習することが可能となる。
 
-### 4.3 Adaptive Decision via Robust Statistics
+### 5.3 Adaptive Decision via Robust Statistics
 
-環境ノイズ（$N_p, N_l$）による誤検知を防ぐため、固定閾値ではなく、学習データの統計量に基づく適応的閾値（Adaptive Thresholding）を採用する。
+環境ノイズ（ $N_p, N_l$ ）による誤検知を防ぐため、固定閾値ではなく、学習データの統計量に基づく適応的閾値（Adaptive Thresholding）を採用する。
 外れ値の影響を受けにくい中央値（Median）と四分位範囲（IQR）を用い、異常スコアをロバストなZスコアに変換する。
 
 $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$$
 
-最終的な判定は $Z(x_t) > \theta$ で行われる。実験的に $\theta \approx 3.0$（3シグマ相当）が最適であることが確認されている。
+最終的な判定は $Z(x_t) > \theta$ で行われる。実験的に $\theta \approx 3.0$ （3シグマ相当）が最適であることが確認されている。
 
 -----
 
-## 5\. Experimental Evaluation (評価実験)
+## 6\. Experimental Evaluation (評価実験)
 
-### 5.1 Datasets & Threat Models (データセットと脅威モデル)
+### 6.1 Datasets & Threat Models (データセットと脅威モデル)
 
 提案手法の有効性と汎化性能を検証するため、計5つのデータセット（総計166,690サンプル）を使用した。
 
@@ -217,7 +252,7 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 | **CIC-IDS2017** | Cyber | 20,000 | DDoS, Brute Force | （汎化性能評価用・未知の攻撃） |
 | **UNSW-NB15** | Cyber | 20,000 | Fuzzers, Backdoor | （汎化性能評価用・未知の攻撃） |
 
-### 5.2 Baselines (比較手法)
+### 6.2 Baselines (比較手法)
 
 提案手法の性能を客観的に評価するため、以下の3つの代表的な教師なし異常検知モデルと比較を行った。全てのモデルについて、グリッドサーチによるパラメータ最適化を実施した。
 
@@ -225,7 +260,7 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 2.  **Deep Autoencoder (AE):** 再構成誤差を用いる深層学習アプローチ（3層エンコーダ/デコーダ）。
 3.  **One-Class SVM (OCSVM):** カーネル法（RBF）を用いた境界決定手法。
 
-### 5.3 Experimental Environment
+### 6.3 Experimental Environment
 
   * **Software:** Python 3.8, Scikit-learn, LightGBM.
   * **Hardware:** Intel Core i7 CPU (No GPU required for inference).
@@ -233,20 +268,20 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
 -----
 
-### 5.4 Robustness against Adaptive Adversarial Attacks (敵対的攻撃への耐性)
+### 6.4 Robustness against Adaptive Adversarial Attacks (敵対的攻撃への耐性)
 
 本節では、攻撃者が検知アルゴリズム（監視されている不変量）を把握しており、それを回避するために適応的なノイズ（Adversarial Perturbation）を付加したシナリオにおける堅牢性を評価する。
 
 #### (1) Defense against Jittery Beacon (対ゆらぎ通信)
 
-  * **Attack Scenario:** 攻撃者は `Cyber Regularity`（分散の低さ）による検知を回避するため、通信間隔 $\Delta t$ に正規分布ノイズ $\epsilon \sim \mathcal{N}(0, \sigma^2)$ を付加した（Jittery Beacon）。
+  * **Attack Scenario:** 攻撃者は `Cyber Regularity` （分散の低さ）による検知を回避するため、通信間隔 $\Delta t$ に正規分布ノイズ $\epsilon \sim \mathcal{N}(0, \sigma^2)$ を付加した（Jittery Beacon）。
   * **Result:** **Recall 93.00%**.
   * **Mechanism:**
     個々のパケット間隔はランダム化されたが、ウィンドウサイズ $W=20$ における「ユニーク比率（Unique Ratio）」および「大局的な分散」は、依然として人間によるランダムな通信（高エントロピー）と比較して有意に低いままであった。攻撃者がこれを人間のレベルまで高めるには、通信頻度を極端に下げる必要があり、それは攻撃（C2通信）の無効化を意味する（Cost Asymmetryの成立）。
 
 #### (2) Defense against Smudged Salami (対・人間的偽装)
 
-  * **Attack Scenario:** 攻撃者は `Logical Entropy`（ベンフォード則）による検知を回避するため、不正な端数をランダムではなく、「0.99」や「0.50」といった人間が好みやすい値（Psychological Pricing）に置換した（Smudged Salami）。
+  * **Attack Scenario:** 攻撃者は `Logical Entropy` （ベンフォード則）による検知を回避するため、不正な端数をランダムではなく、「0.99」や「0.50」といった人間が好みやすい値（Psychological Pricing）に置換した（Smudged Salami）。
   * **Result:** **Recall 84.40%**.
   * **Mechanism:**
     個々の値は人間らしく偽装されたが、集団としての数値分布 $P(X)$ は、自然な商取引の分布 $Q(X)$ から統計的に乖離したままであった。本手法は、単一のデータポイントではなく、分布間のKLダイバージェンス $D_{KL}(P \| Q)$ を監視しているため、この微細な統計的歪みを検知することに成功した。
@@ -260,7 +295,7 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
 -----
 
-### 5.5 Zero-Shot Generalization (未知環境への汎化性能)
+### 6.5 Zero-Shot Generalization (未知環境への汎化性能)
 
 本手法のロジック（因果的不変量）が、特定のデータセットに依存しない普遍性を持つことを証明するため、学習に一切使用していない（Zero-Shot）外部データセットに対する適用評価を行った。
 
@@ -268,7 +303,7 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
   * **Result:** **Recall 76.83%** (Threshold Tuningなし).
   * **Analysis:**
-    本手法はCTU-13（ボットネット）で学習されたが、CIC-IDS2017に含まれるDDoSやBrute Force攻撃もまた「機械的な反復」という共通の性質を持つ。`Cyber Regularity` 不変量は、攻撃の種類に関わらずこの本質的特徴を捉え、未知の攻撃を汎化的に検知した。
+    本手法はCTU-13（ボットネット）で学習されたが、CIC-IDS2017に含まれるDDoSやBrute Force攻撃もまた「機械的な反復」という共通の性質を持つ。 `Cyber Regularity` 不変量は、攻撃の種類に関わらずこの本質的特徴を捉え、未知の攻撃を汎化的に検知した。
 
 #### (2) UNSW-NB15 (Fuzzers / Backdoor)
 
@@ -277,20 +312,21 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
     Fuzzers攻撃は極めて大量のパケットを送信するため、本手法が採用するロバスト統計（Median/IQR）においては、偏差値（Z-Score）が 50.0 を超える極端な異常値として観測された。
     また、Backdoor通信は極端に低い分散を示し、これは「分散ゼロ」という特異点として検出された。この「100%」という数字は、ロバスト統計による数理的な分離の必然的な結果である。
 
-以下の図（Fig 2）は、UNSW-NB15環境において、本システムが環境ノイズを自動学習し、攻撃を検知した瞬間の可視化である。
 
-![result](/images/result.png)
+![Fig2](/images/result.png)
+
+以下の図（Fig 2）は、UNSW-NB15環境において、本システムが環境ノイズを自動学習し、攻撃を検知した瞬間の可視化である。
 
 *(Fig 2: 未知の環境（UNSW-NB15）における検知状況。青線（異常スコア）が攻撃期間（赤背景）においてのみ、動的閾値（赤点線）を鋭く突破していることが確認できる)*
 
 -----
 
-### 5.6 Dynamic Consistency Analysis (動的整合性の検証)
+### 6.6 Dynamic Consistency Analysis (動的整合性の検証)
 
 本実験において、静的な統計検知（Isolation Forest）が苦手とする「動的な物理攻撃」に対する優位性を検証した。
 
   * **Attack Scenario (Freeze Attack):**
-    センサー値を正常範囲内（例：$30^\circ\text{C}$）で固定する。値自体は正常であるため、静的な外れ値検知では捕捉できない。
+    センサー値を正常範囲内（例： $30^\circ\text{C}$ ）で固定する。値自体は正常であるため、静的な外れ値検知では捕捉できない。
   * **Result:**
       * **Isolation Forest:** F1-Score **0.35**. （正常な静止と攻撃による固定を区別できず失敗）
       * **CausalSentinel (Ours):** F1-Score **0.68**. （約2倍の精度）
@@ -299,7 +335,7 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
 -----
 
-### 5.7 Ablation Study: Isolating the Causal Contribution (アブレーション研究)
+### 6.7 Ablation Study: Isolating the Causal Contribution (アブレーション研究)
 
 本手法の性能向上要因が、分類器（LightGBM）の能力によるものか、提案する因果特徴量（Invariants）によるものかを厳密に分離するため、同一条件下でのアブレーション研究を実施した。
 
@@ -308,11 +344,13 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
     1.  **Baseline (Raw):** LightGBM + 生データのみ + Synthetic Dojo (Augmentationあり)
     2.  **Proposed (Causal):** LightGBM + 生データ + **因果特徴量** + Synthetic Dojo
-        両モデルに対し、**"Frequency Shift Attack"**（値の範囲は正常データと同じだが、物理的な振動数が異常に高い攻撃）を注入し、その検知能力を比較した。この攻撃は、単なる値の閾値判定（Snapshot）では検知不可能であり、時系列的なダイナミクス（Dynamics）の理解を必要とする。
+
+    両モデルに対し、**"Frequency Shift Attack"**（値の範囲は正常データと同じだが、物理的な振動数が異常に高い攻撃）を注入し、その検知能力を比較した。この攻撃は、単なる値の閾値判定（Snapshot）では検知不可能であり、時系列的なダイナミクス（Dynamics）の理解を必要とする。
 
   * **Results:**
 
-    ![Frequency Attackの結果](/images/result2.png)
+
+    ![Fig3](/images/result2.png)
 
     *(Fig 3: アブレーション研究の結果。因果特徴量を持たないベースラインモデル（左）はランダム推測と同等の性能（F1 0.510）に留まったのに対し、提案手法（右）は高い検知精度（F1 0.848）を達成した)*
 
@@ -322,11 +360,11 @@ $$Z(x_t) = \frac{\text{Score}(x_t) - \text{Median}_{train}}{\text{IQR}_{train}}$
 
 -----
 
-## 6\. Discussion: Deconstructing the Results (結果の深層分析)
+## 7\. Discussion: Deconstructing the Results (考察)
 
-本節では、実験で得られた特筆すべき結果について、その統計的・物理的メカニズムを掘り下げ、本手法の有効性が偶然の産物ではなく、システム設計上の必然であることを論証する。
+本節では、実験で得られた結果について、その統計的・物理的メカニズムを深く掘り下げ、本手法の有効性がシステム設計上の必然であることを論証する。
 
-### 6.1 The Mathematical Necessity of "Deterministic Separation"
+### 7.1 The Mathematical Necessity of "Deterministic Separation"
 
 UNSW-NB15データセットにおける高いRecallは、過学習やデータリークによるものではなく、本手法が採用した **ロバスト統計（Robust Statistics）** の特性による数学的必然（Deterministic Separation）である。
 
@@ -337,12 +375,12 @@ UNSW-NB15データセットにおける高いRecallは、過学習やデータ�
   * **確率論的解釈:**
     正規分布において $50\sigma$ を超える事象が発生する確率は $P(Z > 50) \approx 10^{-545}$ であり、物理的に「あり得ない」事象である。したがって、これを閾値 $\theta \approx 3.0$ で検知することは、確率的な賭けではなく、決定論的な分離操作と見なせる。
 
-### 6.2 Why Causal Models Defeat GANs? (対GAN勝利の理論的根拠)
+### 7.2 Why Causal Models Defeat GANs? (対GAN勝利の理論的根拠)
 
 GAN（敵対的生成ネットワーク）を用いた偽装攻撃に対し、本手法は **86.64%** の検知率を維持した。なぜGANは敗北したのか？ これを **データ処理不等式（Data Processing Inequality: DPI）** の観点から考察する。
 
   * **因果の欠落:**
-    物理システムにおいて、入力 $C$（Traffic）と出力 $P$（CPU）の間には、物理法則 $f$ に基づく因果関係が存在する。
+    物理システムにおいて、入力 $C$ （Traffic）と出力 $P$ （CPU）の間には、物理法則 $f$ に基づく因果関係が存在する。
     $$C \xrightarrow{f} P \quad \text{(Time Lag } \tau \text{ and Inertia } I \text{ exists)}$$
     一方、GANによる生成プロセスは、学習データ分布 $P(C, P)$ を模倣する写像 $G(z)$ である。
     $$Z \xrightarrow{G} (\hat{C}, \hat{P})$$
@@ -350,63 +388,25 @@ GAN（敵対的生成ネットワーク）を用いた偽装攻撃に対し、�
     DPIにより、GANの生成過程において、元の物理法則 $f$ が持つ「時間的遅延」や「微細な過渡応答情報」は保存されない。GANは「静的な相関（Joint Distribution）」を完璧に模倣できても、「動的な因果（Interventional Response）」までは再現できない。
     本手法の物理的不変量（Lipschitz Consistency）は、この「動的因果の欠落」を残差として検出したため、統計的には完璧な偽装を見破ることができたのである。
 
-### 6.3 Fairness of Baseline Comparison (比較の公平性に関する議論)
+### 7.3 Fairness of Baseline Comparison (比較の公平性に関する議論)
 
-「教師あり学習（提案手法）と教師なし学習（既存手法）の比較は不公平ではないか」という懸念に対し、我々は **Section 5.7** で実施したアブレーション研究をもって回答とする。
+「教師あり学習（提案手法）と教師なし学習（既存手法）の比較は不公平ではないか」という懸念に対し、我々は **Section 6.7** で実施したアブレーション研究をもって回答とする。
 
   * **Comparison under Same Supervision:**
-    Section 5.7において、我々は同一の教師あり学習アルゴリズム（LightGBM）と同一のデータ拡張（Synthetic Dojo）を用い、入力特徴量のみを変えた比較を行った。
+    Section 6.7において、我々は同一の教師あり学習アルゴリズム（LightGBM）と同一のデータ拡張（Synthetic Dojo）を用い、入力特徴量のみを変えた比較を行った。
   * **Decisive Factor:**
     その結果、生データのみを用いたモデルは **F1 0.510** と検知に失敗したのに対し、因果不変量を用いたモデルは **F1 0.848** を達成した。
   * **Conclusion:**
     これは、本手法の高い性能が「教師あり学習を用いたこと」だけによるものではなく、**「因果的ドメイン知識をモデルに注入したこと」** が決定的な要因であることを示している。
 
-### 6.4 The "Synthetic Dojo" Circularity Concern (データ拡張の循環論法について)
+### 7.4 The "Synthetic Dojo" Circularity Concern (データ拡張の循環論法について)
 
 「自分で生成した攻撃データを学習し、自分で検知するのは自明ではないか？」という懸念に対し、我々は以下の2点で反論する。
 
-1.  **Generalization to Unknown Dynamics:** Section 5.7で示した周波数攻撃（Frequency Attack）は、単純なDojoのランダム生成とは異なるダイナミクスを持つが、提案手法はこれを検知した。これは、モデルが特定の攻撃パターンを暗記したのではなく、「運動方程式の不変性」を学習したことを示唆している。
+1.  **Generalization to Unknown Dynamics:** Section 6.7で示した周波数攻撃（Frequency Attack）は、単純なDojoのランダム生成とは異なるダイナミクスを持つが、提案手法はこれを検知した。これは、モデルが特定の攻撃パターンを暗記したのではなく、「運動方程式の不変性」を学習したことを示唆している。
 2.  **Zero-Shot Capability:** 本手法は、Dojoで生成していない未知の攻撃（CIC-IDS2017のDDoSやBrute Force）に対しても高い検知率（76.8%）を示した。
 
-### 6.5 Limitations (限界と今後の課題)
-
-本手法は万能ではない。以下のシナリオにおいては検知が困難になる可能性がある。
-
-1.  **Physics-Informed Attacks:** 攻撃者が対象システムの物理モデル（微分方程式）を完全に把握し、物理法則に矛盾しない偽装データを生成した場合、検知は不可能に近い。ただし、個体差（摩擦係数や経年劣化）まで再現することは極めて困難である。
-2.  **Analog Sensor Hacking:** センサー自体が物理的に欺瞞（氷で冷やす等）された場合、デジタルデータは正常となるため検知できない。これには映像監視など、別モダリティとの統合（Multimodal Fusion）が必要である。
-3.  **High-Entropy Normal Traffic:** 暗号化通信や圧縮データなど、正常時からエントロピーが極めて高いデータにおいては、論理的不変量（ベンフォード則）の感度が低下する可能性がある。その場合、本手法は規則性（Regularity）に基づく不変量に依存することになる。
-
------
-
-## 7\. Related Work & Differentiation (関連研究と差別化)
-
-本節では、CPSセキュリティにおける主要な研究動向を概観し、本手法（CausalSentinel）の位置付けと優位性を明確にする。
-
-### 7.1 Deep Learning-based Anomaly Detection (深層学習ベースの異常検知)
-
-近年の異常検知研究は、深層学習（DL）モデルが主流である。
-
-  * **Methods:** Autoencoder (AE), Variational Autoencoder (VAE), LSTM-VAE, OmniAnomaly [4], USAD [5], TranAD [8], GDN [6] 等。
-  * **Limitations:**
-    これらの手法は、正常データの「統計的相関（Correlation）」を学習することに特化している。そのため、攻撃者がGAN等を用いて相関関係を維持したまま攻撃を行う「分布内攻撃（In-distribution Attacks）」に対して脆弱である。本研究の実験において、Deep AutoencoderのF1スコアが0.15に留まった事実は、「相関学習だけでは因果的矛盾を検知できない」という限界を示唆している。
-
-### 7.2 Causal Inference in Security (セキュリティにおける因果推論)
-
-因果推論をセキュリティに応用する試みも散見される。
-
-  * **Methods:** ログデータからの因果グラフ構築によるRoot Cause Analysis [9, 10] や、Invariant Risk Minimization (IRM) [11] による頑健化。
-  * **Limitations:**
-    既存の因果研究の多くは「事後分析（Forensics）」や「静的な画像認識」に焦点を当てており、リアルタイム性が求められるIDS（侵入検知）への応用は限定的であった。また、PCアルゴリズム等の因果探索は計算コストが高く（$O(d^k)$）、エッジデバイスでの実行には不向きである。本研究は、ドメイン固有の因果知識を「軽量な特徴量」として実装し、**推論時間 0.03ms** という実用的な速度を実現した点で、既存研究と一線を画す。
-
-### 7.3 Hybrid Neuro-Symbolic Approaches (ハイブリッド・ニューロシンボリック手法)
-
-Neuro-Symbolic AIは、学習能力と推論能力を統合するアプローチである [12]。
-
-  * **Methods:** Logic Tensor Networks (LTN), Neural Theorem Provers.
-  * **Limitations:**
-    従来の手法は、論理推論の計算負荷が高く、CPSのような高頻度データストリームへの適用が困難であった。本研究は、論理制約（不変量）を「特徴量抽出（Feature Extraction）」として切り出し、後段を高速なGBDTに任せる **"Causal-Informed Hybrid Architecture"** を採用することで、解釈性・堅牢性と実用的な速度を両立させた。
-
-### 7.4 Comparison Summary (比較総括)
+### 7.5 Comparison Summary (比較総括)
 
 表2は、本手法と既存アプローチの機能比較である。
 
@@ -419,14 +419,13 @@ Neuro-Symbolic AIは、学習能力と推論能力を統合するアプローチ
 | **Causal Discovery (PC Algo)** | Yes | Very Low | High | Medium |
 | **Ours (CausalSentinel)** | **Yes** | **High** | **High** | **High** |
 
-> **結論:**
-> 本手法 `CausalSentinel` は、これまでの各アプローチが抱えていたトレードオフ（精度のDL、速度の統計、解釈性の因果）を解消し、全ての要件を高水準で満たす唯一の統合ソリューションである。特に、「高速な因果検知（Fast Causal Detection）」を実現した点は、CPSセキュリティにおける実用的なブレイクスルーである。
+**結論:** 本手法 `CausalSentinel` は、これまでの各アプローチが抱えていたトレードオフ（精度のDL、速度の統計、解釈性の因果）を解消し、全ての要件を高水準で満たす統合ソリューションである。
 
 -----
 
 ## 8\. Limitations & Future Work (限界と今後の展望)
 
-本研究は「因果検知」の有効性を証明したが、完全な自律型セキュリティの実現に向けては、以下の限界と発展的課題が残されている。これらを克服することが、次の研究フェーズ（Generation 2）の目標となる。
+本研究は「因果検知」の有効性を証明したが、完全な自律型セキュリティの実現に向けては、以下の限界と発展的課題が残されている。
 
 ### 8.1 The "Analog Gap" and Multimodal Fusion
 
@@ -458,7 +457,7 @@ Neuro-Symbolic AIは、学習能力と推論能力を統合するアプローチ
     深層学習（Deep Learning）はデータの「相関」を学習するが、物理世界との接点を持つCPSにおいては、相関は容易に偽装可能である。対して、本手法が採用した「因果律」は、攻撃者が模倣するためにシステム全体の物理シミュレーションを要するため、非対称な防御優位性（Asymmetric Defense Advantage）を確立できる。
 
 2.  **Knowledge as a Defense:**
-    Section 5.7のアブレーション研究により、因果特徴量を排除したモデルは検知不能（F1 0.51）に陥ることが確認された。これは、\*\*「データ量がいかに膨大であっても、ドメイン知識なしに因果的矛盾を学習できない」\*\*という事実を浮き彫りにした。
+    Section 6.7のアブレーション研究により、因果特徴量を排除したモデルは検知不能（F1 0.51）に陥ることが確認された。これは、**「データ量がいかに膨大であっても、ドメイン知識なしに因果的矛盾を学習できない」** という事実を浮き彫りにした。
 
 3.  **Efficiency is Security:**
     既存のSOTAモデル（OCSVM等）と比較して **302倍** の推論速度を達成したことは、リソースの限られたエッジデバイスにおいて「自律防御」を可能にする決定的な価値を持つ。
@@ -469,14 +468,31 @@ Neuro-Symbolic AIは、学習能力と推論能力を統合するアプローチ
 
 ## References
 
-[4] Y. Su et al., "OmniAnomaly: Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Networks," in *KDD*, 2019.
-[5] J. Audibert et al., "USAD: UnSupervised Anomaly Detection on Multivariate Time Series," in *KDD*, 2020.
-[6] A. Deng and B. Hooi, "Graph Neural Network-Based Anomaly Detection in Multivariate Time Series," in *AAAI*, 2021.
+[1] V. Chandola, A. Banerjee, and V. Kumar, "Anomaly detection: A survey," *ACM computing surveys (CSUR)*, vol. 41, no. 3, pp. 1-58, 2009.
+
+[2] A. Zimek, E. Schubert, and H.-P. Kriegel, "A survey on unsupervised outlier detection in high-dimensional numerical data," *Statistical Analysis and Data Mining: The ASA Data Science Journal*, vol. 5, no. 5, pp. 363-387, 2012.
+
+[3] F. T. Liu, K. M. Ting, and Z.-H. Zhou, "Isolation forest," in *2008 eighth ieee international conference on data mining*, 2008.
+
+[4] M. Sakurada and T. Yairi, "Anomaly detection using autoencoders with nonlinear dimensionality reduction," in *Proceedings of the MLSDA 2014 2nd workshop on machine learning for sensory data analysis*, 2014.
+
+[5] J. Pearl, *Causality*. Cambridge university press, 2009.
+
+[6] Y. Su et al., "OmniAnomaly: Robust Anomaly Detection for Multivariate Time Series through Stochastic Recurrent Neural Networks," in *KDD*, 2019.
+
+[7] J. Audibert et al., "USAD: UnSupervised Anomaly Detection on Multivariate Time Series," in *KDD*, 2020.
+
 [8] J. Tuli et al., "TranAD: Deep Transformer Networks for Anomaly Detection in Multivariate Time Series Data," in *VLDB*, 2022.
-[9] M. Agarwal et al., "Root Cause Analysis of Anomalies in Microservices Architectures," in *IEEE Access*, 2020.
-[10] S. Zhu et al., "Causal Discovery for Root Cause Analysis in Microservice Systems," in *IEEE/ACM CCGRID*, 2021.
-[11] M. Arjovsky et al., "Invariant Risk Minimization," *arXiv preprint arXiv:1907.02893*, 2019.
-[12] A. d'Avila Garcez et al., "Neurosymbolic AI: The 3rd Wave," *arXiv preprint arXiv:2012.05876*, 2020.
+
+[9] A. Deng and B. Hooi, "Graph Neural Network-Based Anomaly Detection in Multivariate Time Series," in *AAAI*, 2021.
+
+[10] M. Agarwal et al., "Root Cause Analysis of Anomalies in Microservices Architectures," in *IEEE Access*, 2020.
+
+[11] S. Zhu et al., "Causal Discovery for Root Cause Analysis in Microservice Systems," in *IEEE/ACM CCGRID*, 2021.
+
+[12] M. Arjovsky et al., "Invariant Risk Minimization," *arXiv preprint arXiv:1907.02893*, 2019.
+
+[13] A. d'Avila Garcez et al., "Neurosymbolic AI: The 3rd Wave," *arXiv preprint arXiv:2012.05876*, 2020.
 
 -----
 
@@ -487,14 +503,14 @@ Neuro-Symbolic AIは、学習能力と推論能力を統合するアプローチ
 ### A.1 Detectability of Slow Drift Attacks (Lipschitz Constraint)
 
 **Theorem 1 (Bounded Evasion Time):**
-物理システムの状態変化関数 $f(t)$ がリプシッツ定数 $K$ を持つとする（$|\frac{df}{dt}| \le K$）。
+物理システムの状態変化関数 $f(t)$ がリプシッツ定数 $K$ を持つとする（ $|\frac{df}{dt}| \le K$ ）。
 攻撃者が検知を回避するために、変化率 $\alpha$ の線形ドリフト攻撃 $x'(t) = x(t) + \alpha t$ を注入する場合、攻撃が成功するまでの時間は有限に制約される。
 
 **Proof:**
-検知器のノイズ許容閾値を $\theta$、攻撃の目標値を $L$ とする。
+検知器のノイズ許容閾値を $\theta$ 、攻撃の目標値を $L$ とする。
 
-1.  **Evasion Condition (回避条件):** ドリフトの傾き $\alpha$ は、システムの正常なゆらぎ（ノイズ $\epsilon$）と統計的に区別がつかない範囲でなければならない。すなわち $\alpha \le \epsilon$。
-2.  **Damage Condition (攻撃成功条件):** 攻撃がシステムに実害を与えるには、値が安全限界 $L$ を超える必要がある。到達時間を $T$ とすると $\alpha T \ge L$。
+1.  **Evasion Condition (回避条件):** ドリフトの傾き $\alpha$ は、システムの正常なゆらぎ（ノイズ $\epsilon$ ）と統計的に区別がつかない範囲でなければならない。すなわち $\alpha \le \epsilon$ 。
+2.  **Damage Condition (攻撃成功条件):** 攻撃がシステムに実害を与えるには、値が安全限界 $L$ を超える必要がある。到達時間を $T$ とすると $\alpha T \ge L$ 。
 
 したがって、攻撃所要時間は $T \ge \frac{L}{\epsilon}$ となる。
 本手法の **Regressor** は、過去のウィンドウ $W$ からの予測値 $\hat{x}(t)$ との残差 $r_t$ を監視する。ドリフト環境下での残差は $r_t \approx \sum_{i=1}^{W} \alpha = W \alpha$ となり、ウィンドウサイズ $W$ に比例して増幅される。
@@ -547,10 +563,10 @@ GANの生成プロセスは、潜在変数 $Z$ からのマッピング $C', P' 
 
 Algorithm 1 における具体的な設定値。
 
-  * **Injection Rate ($\rho$):** 0.5 (学習時は正常:異常=1:1にバランシング)
-  * **Slow Drift ($\alpha$):** $\alpha = 0.1 \times \text{std}(X)$ per step.
-  * **Salami Smudging ($\delta$):** $\delta \in \{0.00, 0.25, 0.50, 0.95, 0.99\}$ (Uniformly selected).
-  * **Jittery Beacon ($\sigma$):** Interval $\sim \mathcal{N}(10.0, 3.0^2)$.
+  * **Injection Rate ( $\rho$ ):** 0.5 (学習時は正常:異常=1:1にバランシング)
+  * **Slow Drift ( $\alpha$ ):** $\alpha = 0.1 \times \text{std}(X)$ per step.
+  * **Salami Smudging ( $\delta$ ):** $\delta \in \{0.00, 0.25, 0.50, 0.95, 0.99\}$ (Uniformly selected).
+  * **Jittery Beacon ( $\sigma$ ):** Interval $\sim \mathcal{N}(10.0, 3.0^2)$.
 
 -----
 
@@ -575,8 +591,8 @@ Algorithm 1 における具体的な設定値。
 
 ### C.3 Threshold Optimization
 
-  * **Strategy:** Robust Z-Score based ($Z = \frac{x - \text{Median}}{\text{IQR}}$)
-  * **Optimal Thresholds ($\theta$):**
+  * **Strategy:** Robust Z-Score based ( $Z = \frac{x - \text{Median}}{\text{IQR}}$ )
+  * **Optimal Thresholds ( $\theta$ ):**
       * Phys: 0.81
       * Logic: 0.10
       * Cyber: 0.65
